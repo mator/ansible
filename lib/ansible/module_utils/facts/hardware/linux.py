@@ -89,7 +89,7 @@ class LinuxHardware(Hardware):
 
         cpu_facts = self.get_cpu_facts(collected_facts=collected_facts)
         memory_facts = self.get_memory_facts()
-        dmi_facts = self.get_dmi_facts()
+        dmi_facts = self.get_dmi_facts(collected_facts=collected_facts)
         device_facts = self.get_device_facts()
         uptime_facts = self.get_uptime_facts()
         lvm_facts = self.get_lvm_facts()
@@ -298,7 +298,7 @@ class LinuxHardware(Hardware):
 
         return cpu_facts
 
-    def get_dmi_facts(self):
+    def get_dmi_facts(self, collected_facts=None):
         ''' learn dmi facts from system
 
         Try /sys first for dmi related facts.
@@ -395,7 +395,39 @@ class LinuxHardware(Hardware):
                 else:
                     dmi_facts[k] = 'NA'
 
+        # process firmware/bios version info for Linux on SPARC64 and PPC64 architectures
+        arch = collected_facts.get('ansible_architecture')
+
+        if arch == 'sparc64':
+            sparc_dict = self._get_sparc64_info()
+            dmi_facts.update(sparc_dict)
+
+        if arch == 'ppc64':
+            ppc64_dict = self._get_ppc64_info()
+            dmi_facts.update(ppc64_dict)
+
         return dmi_facts
+
+    def _get_sparc64_info(self):
+        sparc_dict = {}
+        if os.access('/proc/cpuinfo', os.R_OK):
+            for line in get_file_lines('/proc/cpuinfo'):
+                data = line.split(":", 1)
+                key = data[0].strip()
+                if key == "prom":
+                    sparc_dict['bios_version'] = data[1].strip()
+                    sparc_dict['bios_vendor'] = sparc_dict['chassis_vendor'] = 'ORACLE'
+        return sparc_dict
+
+    def _get_ppc64_info(self):
+        ppc64_dict = {}
+        fwver_file = '/proc/device-tree/openprom/ibm,fw-vernum_encoded'
+        if os.access(fwver_file, os.R_OK):
+            vernum = get_file_content(fwver_file)
+            if vernum:
+                ppc64_dict['bios_version'] = vernum[:-1] # strip last binary zero
+                ppc64_dict['bios_vendor'] = ppc64_dict['chassis_vendor'] = 'IBM'
+        return ppc64_dict
 
     def _run_lsblk(self, lsblk_path):
         # call lsblk and collect all uuids
